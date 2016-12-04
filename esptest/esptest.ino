@@ -1,26 +1,35 @@
-/*  
- Név:        TransparentSerial
- Leírás:     Transzparens USB-soros-SWsoros átjáró ESP-8266 WiFi modulhoz
- Link:       http://www.tavir.hu/iot-0
- Fordító:    Arduino-1.6.5.
- Lapka/chip: Arduino Diecimila/UNO
- Szerző:     superp (nick@ forum.tavir.hu)
- Módosítás:  Cseh Róbert / avr(kukac)tavir(pont)hu
- Licensz:    Public Domain
- 
- Forrás:     https://www.arduino.cc/en/Tutorial/SoftwareSerialExample
-*/
- 
 #include <SoftwareSerial.h>
 #include <MyProperty.h>
-#define DEBUG false
+#include <dht.h>
+#include <SPI.h>
+#include <RH_NRF24.h>
+
+
+/*Time*/
+#define sec 1000
+#define minute 60000
+#define hour 3600000
+
+#define DHT11 7
+#define Relay 10
+#define Pump 6
+#define Soil 5
+#define RelayTime minute*10
+#define DEBUG true
 
 MyProperty property = MyProperty();
+dht DHT;
+SoftwareSerial ESPSerial(8, 9); // RX, TX
+
 String apiKey = (String) property.getApiKey();
 String ssid = (String) property.getSsid();
 String pass = (String) property.getPass();
 
-SoftwareSerial ESPSerial(8, 9); // RX, TX
+int value;
+int RelayStatus;
+unsigned long start, finished, elapsed, startRelay;
+
+
 
 String sendData(String command, const int timeout, boolean debug)
 {
@@ -48,7 +57,7 @@ String sendData(String command, const int timeout, boolean debug)
     return response;
 }
 
-String sendSensore(String strTemp){
+void sendSensore(String str){
   
   // TCP connection
   String cmd = "AT+CIPSTART=\"TCP\",\"";
@@ -58,7 +67,7 @@ String sendSensore(String strTemp){
 
   if(ESPSerial.find("ERROR")){
     Serial.println("AT+CIPSTART error");
-    return "Erorr";
+    return;
   }else{
     Serial.println("AT+CIPSTART OK");
   }
@@ -66,8 +75,7 @@ String sendSensore(String strTemp){
   // prepare GET string
   String getStr = "GET /update?api_key=";
   getStr += apiKey;
-  getStr +="&field1=";
-  getStr += String(strTemp);
+  getStr += String(str);
   getStr += "\r\n";
   Serial.println(getStr);
   
@@ -76,11 +84,10 @@ String sendSensore(String strTemp){
   cmd += String(getStr.length());
   cmd += "\r\n";
   sendData(cmd,2000,DEBUG);
-delay(2000);
-ESPSerial.print(getStr); 
-delay(2000);
-ESPSerial.println("AT+CIPCLOSE");
-return "OK";
+  delay(2000);
+  ESPSerial.print(getStr); 
+  delay(2000);
+  ESPSerial.println("AT+CIPCLOSE");
 }
 
 
@@ -92,6 +99,16 @@ void setup()
   sendData("AT+CIOBAUD=9600\r\n",2000,DEBUG);
   Serial.begin(9600); // A belső port megnyitása azonos sebességű legyen az ESPSeriel-al
   ESPSerial.begin(9600); // ESP8266 port 9600 kapcsolati sebesség
+
+  pinMode(Relay, OUTPUT);
+  pinMode(DHT11, OUTPUT);
+  pinMode(Pump, OUTPUT);
+  pinMode(Soil, INPUT);
+  RelayStatus = 1;
+  digitalWrite(Relay, HIGH);
+  startRelay=millis();
+  start=millis();
+  
   Serial.println("ESP8266 WIFI PORT START");
   sendData("AT+CWMODE=3\r\n",1000,DEBUG);
   sendData("AT+CWJAP=\""+ssid+"\",\""+pass+"\"\r\n",5000,DEBUG);
@@ -101,9 +118,38 @@ void setup()
 
 void loop()
 {
-  String strTemp = "30";
-  sendSensore(strTemp);
-  delay(3000);
+  String strTemp, strHum, strSoil, strLight, strPump, str;
+
+  /* Temp and Hum */
+   int chk = DHT.read11(DHT11);
+  /* Soil*/
+  value= analogRead(Soil);
+  
+  /*Relay*/
+  if(millis()-startRelay > RelayTime){
+    if(RelayStatus){
+      RelayStatus = 0;
+     digitalWrite(Relay, LOW);
+    }else{
+      RelayStatus = 100;
+     digitalWrite(Relay, HIGH);
+    }
+     startRelay=millis();
+  }
+
+  
+  strTemp = String(DHT.temperature);
+  strHum = String (DHT.humidity);
+  strSoil = String(value);
+  strLight = String(RelayStatus);
+  strPump = "0";
+  str  = "&field1=" + strTemp;
+  str += "&field2=" + strHum;
+  str += "&field3=" + strSoil;
+  str += "&field4=" + strLight;
+  str += "&field5=" + strPump;
+  sendSensore(str);
+  delay(1000);
 }
 
 
